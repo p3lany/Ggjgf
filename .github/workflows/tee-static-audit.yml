@@ -1,0 +1,75 @@
+name: X657B TEE static audit
+on:
+  push:
+    paths:
+      - 'Tees.zip'
+      - '.github/workflows/tee-static-audit.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect TEE archive
+        run: |
+          python3 - <<'PY'
+          import zipfile, hashlib, pathlib, struct, json, re, os
+          p=pathlib.Path("Tees.zip")
+          data=p.read_bytes()
+          print("ARCHIVE bytes=",len(data),"sha256=",hashlib.sha256(data).hexdigest())
+          z=zipfile.ZipFile(p)
+          report={"archive":{"name":p.name,"size":len(data),"sha256":hashlib.sha256(data).hexdigest()},"members":[]}
+          out=pathlib.Path("tee-unpacked"); out.mkdir()
+          for i in z.infolist():
+              b=z.read(i)
+              q=out/pathlib.Path(i.filename).name
+              q.write_bytes(b)
+              h=hashlib.sha256(b).hexdigest()
+              rec={"name":i.filename,"size":len(b),"sha256":h,"zip_compressed_size":i.compress_size}
+              print("\\nFILE",i.filename,"size",len(b),"sha256",h)
+              print("HEAD",b[:64].hex())
+              if b[:4]==b"\\x7fELF":
+                  cls={1:"ELF32",2:"ELF64"}.get(b[4],"unknown")
+                  endian={1:"little",2:"big"}.get(b[5],"unknown")
+                  machine=struct.unpack_from("<H" if endian=="little" else ">H",b,18)[0]
+                  rec.update(elf_class=cls,endian=endian,machine=machine)
+                  print("ELF",cls,endian,"e_machine",machine)
+              strings=[]
+              for m in re.finditer(rb"[ -~]{6,}",b):
+                  s=m.group().decode("ascii","replace")
+                  strings.append(s)
+              rec["strings_sample"]=strings[:120]
+              print("STRINGS_COUNT",len(strings))
+              for s in strings[:120]: print("STR",s[:240])
+              # AArch64 instruction signatures, aligned little-endian words.
+              if len(b)>=4:
+                  counts={"SMC":0,"HVC":0,"ERET":0,"BR":0,"BLR":0}
+                  examples={k:[] for k in counts}
+                  for off in range(0,len(b)-3,4):
+                      w=int.from_bytes(b[off:off+4],"little")
+                      k=None
+                      if w & 0xffffffe0 == 0xd4000000: k="SMC"
+                      elif w & 0xffffffe0 == 0xd4000002: k="HVC"
+                      elif w==0xd69f03e0: k="ERET"
+                      elif w & 0xfffffc1f == 0xd61f0000: k="BR"
+                      elif w & 0xfffffc1f == 0xd63f0000: k="BLR"
+                      if k:
+                          counts[k]+=1
+                          if len(examples[k])<12: examples[k].append(hex(off))
+                  rec["aarch64_pattern_counts"]=counts
+                  rec["aarch64_pattern_offsets"]=examples
+                  print("AARCH64_PATTERN_COUNTS",json.dumps(counts))
+                  print("AARCH64_PATTERN_OFFSETS",json.dumps(examples))
+              report["members"].append(rec)
+          pathlib.Path("tee-audit.json").write_text(json.dumps(report,indent=2))
+          PY
+      - name: Upload audit report and extracted images
+        uses: actions/upload-artifact@v4
+        with:
+          name: x657b-tee-static-audit
+          path: |
+            tee-audit.json
+            tee-unpacked/
+          retention-days: 7
