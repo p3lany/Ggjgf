@@ -50,8 +50,8 @@ jobs:
                   for off in range(0,len(b)-3,4):
                       w=int.from_bytes(b[off:off+4],"little")
                       k=None
-                      if w & 0xffffffe0 == 0xd4000000: k="SMC"
-                      elif w & 0xffffffe0 == 0xd4000002: k="HVC"
+                      if w & 0xffe0001f == 0xd4000003: k="SMC"
+                      elif w & 0xffe0001f == 0xd4000002: k="HVC"
                       elif w==0xd69f03e0: k="ERET"
                       elif w & 0xfffffc1f == 0xd61f0000: k="BR"
                       elif w & 0xfffffc1f == 0xd63f0000: k="BLR"
