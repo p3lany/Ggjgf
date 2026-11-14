@@ -30,7 +30,7 @@ jobs:
               rec={"name":i.filename,"size":len(b),"sha256":h,"zip_compressed_size":i.compress_size}
               print("\\nFILE",i.filename,"size",len(b),"sha256",h)
               print("HEAD",b[:64].hex())
-              if b[:4]==b"\\x7fELF":
+              if b[:4]==b"\x7fELF":
                   cls={1:"ELF32",2:"ELF64"}.get(b[4],"unknown")
                   endian={1:"little",2:"big"}.get(b[5],"unknown")
                   machine=struct.unpack_from("<H" if endian=="little" else ">H",b,18)[0]
